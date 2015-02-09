@@ -1,0 +1,313 @@
+******************************************************************************
+*                                                                            *
+* hl7d : README                                                              *
+*                                                                            *
+******************************************************************************
+
+Contents
+--------
+
+1.0   Introduction
+2.0   Installation
+2.1     Prerequisites
+3.0   Configuration
+3.1     Plugins
+4.0   Testing
+5.0   Using the hl7d
+5.1     Plugins
+5.1.1     CSV plugins
+5.1.2     Database plugins
+6.0   Change history
+
+
+1.0 Introduction
+----------------
+
+This package is a forking HL7 server, that can handle a number of
+requests in parallel. The server is based on the examples given in the
+O'Reilly cookbook for Perl.  The daemon has been tested in a real life
+situation in an academic hospital in the Netherlands, and has been
+stable in a demanding production environment. However, I would advise
+to do some serious stress and other testing yourself before using it
+in your own environment. Some test scripts are added in the 't'
+directory, that can be used as a basis to write more elaborate tests.
+
+
+2.0 Installation
+----------------
+
+Installation is done good old Perl style. See INSTALL document for
+details.  If you don't read the INSTALL document, then be warned that
+the default install directory is '/usr/local/hl7d-<version>'. To
+override this behaviour, you'll need to provide the 'perl Makefile.PL'
+command with a PREFIX, where to install the daemon, like:
+
+perl Makefile.PL PREFIX=<your location>
+
+
+2.1 Prerequisites
+-----------------
+
+This daemon requires the Net::HL7 module, version 0.66 or better. Make
+sure it's in your library path.
+Other libraries used are IO::Socket, POSIX, strict and Getopt::Long,
+but these should be part of your Perl distro. If not, you might
+consider a newer Perl...
+
+
+3.0 Configuration
+-----------------
+
+The hl7d is configured with the hl7d.conf file, found in the
+installation root, under the 'etc' directory. Configurable items are:
+
+PORT		: port to listen to
+LISTEN		: max number of connections to be forked
+CLIENT_TIMEOUT	: timeout for incoming connections. If no new message has been
+		  received within this timeout, close the socket.
+PLUGIN_PATH	: where to find plugins (usually etc/plugins)
+LOG_DIR		: where to log to (usually var/log in the install root)
+LOG_LEVEL	: one of: debug, info, warn, error, fatal
+
+You may specify another config file on the command line with the --cfg
+option, but make sure that these parameters are set.
+
+
+3.1 Plugins
+-----------
+
+This server is based on the 'plugin' principle. The server dispatches
+incoming requests to specific plugins, that are configured to handle
+the request (see configuration).  Plugins are really simple Perl
+modules, that need to provide a single method, specified as:
+
+	exec($self, $client, $log, $opts)
+
+	* $client is a reference to an object of class
+	  Net::HL7::Daemon::Client
+	* $log is a reference to the hl7d's own logger
+	* $opts is a reference to a hash, containing configuration
+	  options for this plugin
+
+The method should return 0 on success, or the error message on
+failure.
+
+The server will determine which plugin to use based on the message
+type of the incoming request (or MSH(9) for HL7 lovers), and execute
+the exec method of this plugin, providing the hl7 request, the logger
+and options for the plugin as arguments.  If the exec method returns
+anything that is regarded by the Perl interpreter as true, it will be
+considered an error. However, it's up to the plugin what message to
+return to the sender, even in case of failure.
+
+Plugin modules should be available on the hl7d's library search path
+(as specified by the @INC array). This includes './lib' and
+'./etc/plugins' in the hl7d's home.
+
+A plugin can carry it's own config file, but this is not
+necessary. The config file should have the same name as the plugin,
+with the 'conf' extension. So a plugin 'Foo.pm' may have a config file
+'Foo.conf'. The configuration file should contain items in standard
+UNIX fashion like:
+
+NAME = VALUE
+
+one per line. These items will be added to the options hash reference
+passed as the last parameter to the exec method.
+
+Plugins can use the getRequest method of the client to get the current
+request on this client. Do not use the getNextRequest method, unless
+you really know what you're doing. To return a specific response, use
+the sendResponse method. To just send an acknowledgement, use
+sendAck. To send an acknowledgement with an error code, use
+sendNack. Check the HL7 API docs for details.
+
+Some skeleton plugins have been provided in the etc/plugins directory,
+to show what can be done. These include: a CSV file writing plugin and
+a database writing plugin.
+
+To associate a message ype with a plugin, add a line to
+./etc/plugins.conf like:
+
+  <message type>  = <plugin>
+
+so for a plugin 'Foo', to be used for message type ADT^A24, add:
+
+  ADT^A24 = Foo
+
+At this moment, a specific message type can only be handled by a
+single plugin, but hey, you can always stuff all handling in a single
+plugin...
+
+
+4.0 Testing
+-----------
+
+No automated tests are available, but some test scripts are. These are
+in the 't' directory. To be able to test, make sure the hl7d is fully
+configured, start it and the run one or more of the test scripts. The
+scripts are:
+
+single.pl <host> <port>			: send a single HL7 message
+keep.pl	<host> <port> <nr> <sleep>	: send <nr> messages, and sleep for 
+					  <sleep> seconds in between, keeping
+                                          the connection open
+parallel.pl <host> <port> <spawn> <nr>	: spawn <spawn> processes, sending <nr> 
+					  messages each in parallel
+csvexample.pl <host> <port>		: send a single message, and use the
+					  CSVexample plugin to create a CSV file.
+
+Check stdout and the log file of the hl7d for results. You might want
+to set the LOG_LEVEL to debug in the hl7d.conf file.  Or you might
+even want to run the daemon in console mode, with the debug
+option. See 'Running the hl7d' for details.
+
+
+5.0 Using the hl7d
+--------------------
+
+The hl7d is a daemon, that is usually detached from the console, and
+can be started whenever the machine is started. The daemon behaves
+like any Unix/Linux like daemon (or so I hope).  Assuming proper
+configuration, the daemon can be started without command line
+parameters. The daemon will detach from the console, and can safely be
+left on it's own.  However, during testing or debugging, it is handy
+to leave the daemon attached to the console, and send info to
+stdout. To do this, run the daemon as:
+
+	./hl7d.pl --nodetach --debug
+
+This will give you lot's of info on stdout.
+Type ./hl7d.pl --help for all command line options.
+
+When running in detached mode, check the log, specified with the
+LOG_DIR parameter every now and then to see whether the daemon is
+still running, or use the test scripts. An even better idea is to use
+an SMTP plugin or Nagios command to test whether the daemon process is
+still running by simple sending a test message.
+
+
+5.1 Adding plugins
+------------------
+
+The daemon is meant to operate by means of plugins. Without plugins,
+nothing happens. Two basic plugin types are provided: a CSV example
+that shows how to write a plugin that creates a comma separated values
+file, and a DB example that does some database handling. If you think
+of more base types, let me know, and/or send me the code.  The plugins
+are in the directory ./etc/plugins relative to the install
+directory. This path is added to the Perl @INC variable, but if you
+prefer your plugins to live somewhere else, make sure that path is
+added to @INC as well.
+
+
+5.1.1 CSV plugins
+-----------------
+
+The easiest way to create a CSV plugin is to use the CSV module
+provided as a base, like so:
+
+	package myCSV;
+
+	use base qw(CSV);
+
+	1;
+
+That should give you most CSV file functionality you need. Then you
+need to create a configuration file myCSV.conf with the following
+parameters set:
+
+CSV_DIR  	: where to put the CSV file(s)
+CSV_FILE_PREFIX	: name of the file
+CSV_FILE_SUFFIX	: name of the suffix (the stuff after the dot) if any.
+CSV_FIELDS	: number of fields per line
+UNIQUE_FILE	: whether to create a unique file per incoming message.
+	If set to a true (Perl) value, this setting will suffix each file
+	with the MSH(10) field, so as to create a unique name.
+CSV_QUOTE	: quote each field if set with the value given
+
+and for each of the fields in the CSV file:
+
+CSV_<field index> : a pair specifying the segment and field number to
+	store into this field. So a setting 'CSV_1 = 2,3' means: set the
+	field in the CSV on the 1st position to the 3rd field of the second
+	segment of the incoming message. Fields index for the CSV starts with
+	1 (not 0!). Segments start at 0 (for MSH) and fields start at 1.
+
+If this implementation doesn't suit your needs, consider extending
+this plugin, and donate the code, or just write something yourself
+from scratch.
+
+
+5.1.2 Database plugins
+----------------------
+
+In a lot of cases you will want to store things in a database, or
+return data from a database. For this scenario, use the DBexample.pm
+skeleton provided if you like, and fill in the details.
+
+
+6.0 History
+-----------
+0.36:
+* Added version in debug for API and hl7d
+
+0.35:
+* Fixed CSV plugin and example to handle components and subcomponents
+
+0.34:
+* Fix for zombie child processes. Thanx to Christian Long for
+  pointing out the problem.
+* Fix for better (local) signal handling for hl7d and added init.d
+  script for hl7d, thanx to Nathan Vonnahme.
+
+version 0.33:
+* Made plugin configuratin more flexible, by adding support for 
+  MSH(3) and MSH(4) as directive.
+* Added cache for plugins.
+* Added verify option to command line options, to check configuration.
+
+version 0.32:
+* Removed use of system calls to echo and rm, to make the hl7d more 
+  portable.
+
+version 0.31:
+* Version compliant with Net-HL7 0.70
+* Default prefix now /usr/local/hl7d-<version>
+* Added csvexample test
+
+version 0.30:
+* If started without path at all (hl7d.pl instead of ./hl7d.pl) things got
+  rather screwed up. Not anymore.
+* Added HUP handler that restarts daemon
+* Added better daemon features, like standard io to /dev/null
+* Repaired broken REAPER sub that caused the parent process to hang
+* The daemon is now running in tainted mode
+* Added test scripts
+* Added lots of documentation
+* Added example plugin for database handling of incoming messages
+
+version 0.22:
+* fixed a very nasty bug in reading in config files for plugins:
+  this caused the daemon on Sun Solaris to read only one entry.
+
+version 0.21:
+* The daemon now calls the getNextRequest method to read new data.
+
+version 0.20:
+* Passed the LISTEN parameter to the Daemon
+* Added more logging
+* Fixed multiple requests on the same client in the hl7d and the
+  Net::HL7::Daemon. That's why this version of hl7d depends on
+  Net-HL7 version 0.65.
+
+version 0.12:
+* Added opts parameter to call of plugin
+
+version 0.11:
+* Made daemon call plugins with Net::HL7::Daemon::Client object as argument
+instead of Net::HL7::Request. This makes it up to the plugin to reply with
+any message.
+
+version 0.10:
+* Initial version

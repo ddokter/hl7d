@@ -1,0 +1,18 @@
+Installation
+
+Installing this program is done in good old fashioned Perl style:
+
+* Get the archive (looks like you have it...)
+
+tar -xzf hl7d-<version>.tgz
+
+cd hl7d-<version>
+perl Makefile.PL PREFIX=<wherever you want this stuff>
+make
+make test (none yet, but read the output!)
+make install
+
+A suggested install dir (PREFIX) is /usr/local/hl7d; all stuff will be
+installed below this directory.
+
+That's all folks!
